@@ -1,0 +1,24 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "grok-review-cc",
+  "description": "Independent second-opinion code review by Grok, from Claude Code, inside grok's own read-only sandbox.",
+  "owner": {
+    "name": "Alan Ho"
+  },
+  "metadata": {
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "grok",
+      "description": "Independent second-opinion code review by Grok, from Claude Code, inside grok's own read-only sandbox.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Alan Ho"
+      },
+      "source": "./plugins/grok",
+      "license": "MIT",
+      "homepage": "https://github.com/elderengineer/grok-review-cc"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+# harness scratch in any repo this plugin reviews (briefs, reviews, ledger, run marker)
+.grok-review/
+
+# editors and OS
+*.swp
+*~
+.DS_Store
+.idea/
+.vscode/
+
+# local Claude Code settings
+.claude/settings.local.json
