@@ -47,6 +47,23 @@ docs do not pin that wording, so the pattern can only ever add a catch, never pr
 happen. Do not treat it as the guarantee; the fail-closed profile, the probe and the tree assertion
 are the guarantee.
 
+## What was measured, and when
+
+Measured 2026-09-05 on this design's first end-to-end run — Linux 6.x, bubblewrap 0.6.1, grok 1.0.5
+pinned through `GROK_BIN`, model `grok-4.6-build`:
+
+- `/grok:setup`'s probe returned **START OK, WRITE OK, DENY OK, READ OK** under the rendered
+  `[profiles.grok-review]`. The reviewer started, could not `touch` a path inside the repository,
+  could not read a `*.pem` matching the deny list, and could read an ordinary file.
+- A full `code` review of a 14-line diff completed and was promoted: 7 turns, 130,876 uncached input
+  + 98,688 cache-read + 15,275 output = 244,839 total tokens, $0.0685. Note the ratio — a 760-byte
+  diff cost a quarter of a million tokens, because the reviewer's context is re-sent on every step.
+  That ratio is the whole argument for the delta default and the size budget.
+- `git status --porcelain` and `HEAD` were unchanged across the run, and every post-run contract
+  gate (sentinel, `end_turn`, minimum bytes, claim table) passed on real output.
+
+Re-measure on a grok or bubblewrap upgrade; the probe is one command and one small model call.
+
 ## The version constraint, in full
 
 **grok 1.0.13 cannot run this harness on bubblewrap 0.6.1.** After re-exec into bwrap it verifies

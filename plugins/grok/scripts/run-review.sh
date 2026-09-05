@@ -716,6 +716,10 @@ parse_run_args() {
       --base)   [ $# -ge 2 ] || usage; BASE="$2";  shift 2 ;;
       --full)       FULL=1;       shift ;;
       --force)      FORCE=1;      shift ;;
+      # Claude's flag, not the harness's: Phase B is Claude editing host-side after the run, and
+      # nothing inside the sandbox ever edits anything. Tolerated rather than rejected so a command
+      # that forwards its arguments verbatim does not abort on the one flag it is meant to keep.
+      --fix)        say "NOTE — --fix is applied by Claude host-side after this run; the reviewer never edits."; shift ;;
       --force-size) FORCE_SIZE=1; shift ;;
       --parallel)   PARALLEL=1;   shift ;;
       -*) usage ;;

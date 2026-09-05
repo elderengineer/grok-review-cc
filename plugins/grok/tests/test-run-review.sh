@@ -218,6 +218,9 @@ rc=$(run init code --force >/dev/null 2>&1; echo $?)
 check "init --force resets it" "$(lived $rc)"
 rc=$(run init no-such-lens >/dev/null 2>&1; echo $?)
 check "an unknown lens is refused" "$(died $rc)"
+err="$(run init code --force --fix 2>&1)"; rc=$?
+check "--fix is tolerated, not a usage error" "$(lived $rc)"
+check "…and says Claude applies it host-side" "$(grep -q 'host-side' <<<"$err" && echo 0 || echo 1)"
 
 # ==================================================================================================
 banner "brief gates"

@@ -22,9 +22,10 @@ The lens is the first word that is not a flag. If none was typed, use `code`. Ru
 `bash "${CLAUDE_PLUGIN_ROOT}/scripts/run-review.sh" lenses` if you need the list — a repo can
 override any shipped lens or add its own, so never assume the shipped set.
 
-Say in one line which lens runs and why. `--fix` is yours, not the harness's: strip it from the
-arguments you pass on. Everything else (`--topic`, `--round`, `--since`, `--full`, `--base`,
-`--force`, `--force-size`, `--parallel`) passes through verbatim.
+Say in one line which lens runs and why. `--fix` is yours, not the harness's — it changes nothing
+about the run, only what you do afterwards. Everything else (`--topic`, `--round`, `--since`,
+`--full`, `--base`, `--force`, `--force-size`, `--parallel`) passes through verbatim; the script
+takes `--fix` too and says it is ignoring it, so forwarding the arguments whole is safe.
 
 ## Phase 1 — the brief, which you write
 

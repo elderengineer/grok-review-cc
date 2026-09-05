@@ -1,6 +1,6 @@
 ---
 name: coverage
-summary: Does the suite prove what it claims — what is reachable and untested, which case is decorative?
+summary: Does the test suite cover what it claims to? Finds the missing cases and the ones that prove nothing.
 require: settled decisions, what the suite claims
 ---
 
@@ -19,8 +19,8 @@ the work, and should not assume anything the brief does not state.
 Do not review test style, naming, helper structure or language idiom — those are out of scope and
 another lens owns them. You are here for one question:
 
-> **Does this suite prove what it claims to prove, and what can still break that no case would
-> catch?**
+> **Does this test suite cover what it claims to cover, and what could still break without any
+> test catching it?**
 
 A suite that goes green while proving less than its acceptance line says is worse than no suite,
 because it retires the suspicion that would otherwise have found the bug. Hunt for that.

@@ -1,0 +1,15 @@
+
+# Sandbox profile for the grok review harness (github.com/elderengineer/grok-review-cc).
+#
+# Why a CUSTOM profile rather than plain `--sandbox read-only`: a BUILT-IN profile that cannot be
+# applied (unsupported kernel, missing entitlements) makes grok warn and continue WITHOUT
+# enforcement — the reviewer would then be running unsandboxed with permissions auto-approved, and
+# nothing in the output would say so. An explicitly-requested CUSTOM profile refuses to start
+# instead, and the non-empty `deny` list is what makes that refusal kernel-backed on Linux via
+# bubblewrap. (`~/.grok/docs/user-guide/18-sandbox.md`, "Platform Support".)
+#
+# The reviewer still needs to read the whole tree and run `git diff` — this is about WRITES.
+# Commit this file if you want every checkout of this repository to review under the same policy.
+[profiles.grok-review]
+extends = "read-only"
+deny = ["**/.env", "**/.env.*", "**/*.pem", "**/*.key", "**/id_rsa*", "**/id_ed25519*", "**/auth.json", "**/.netrc", "**/credentials", "**/*.p12", "**/*.keystore"]
