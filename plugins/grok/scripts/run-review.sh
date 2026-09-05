@@ -416,7 +416,8 @@ show_ledger() { # [topic]
   '
   echo
   echo "in_tok is UNCACHED input; cache_read_tok is the cache bucket; total_tok is the burn signal."
-  echo "An empty cost column means the server reported an incomplete cost — unknown, never free."
+  echo "An empty cost column means the server reported an incomplete cost — unknown, never free,"
+  echo "so the \$ totals above are a LOWER BOUND whenever any row's cost column is blank."
 }
 
 # --- the run marker --------------------------------------------------------------------------------
