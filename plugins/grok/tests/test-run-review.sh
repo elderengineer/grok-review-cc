@@ -46,6 +46,12 @@ check() { if [ "$2" -eq 0 ]; then ok "$1"; else bad "$1"; fi; }
 died()  { [ "$1" -ne 0 ] && echo 0 || echo 1; }   # rc -> the 0/1 `check` wants
 lived() { [ "$1" -eq 0 ] && echo 0 || echo 1; }
 have()  { grep -qF -- "$2" "$1"; }
+# The lens's closing instruction must be the line immediately above the sentinel the reviewer reads
+# last — not buried under the harness's injected sections, which is what the reviewer then ends on.
+closing_above_sentinel() { # <file>
+  [ "$(tail -1 "$1")" = "$SENTINEL" ] &&
+    [ "$(tail -2 "$1" | head -1)" = 'End the response with this exact line, on its own, and nothing after it:' ]
+}
 
 # --- the fake grok ---------------------------------------------------------------------------------
 # It emits the documented headless JSON result shape (14-headless-mode.md § json): text, stopReason,
@@ -157,6 +163,8 @@ ${2:-}
 ## Claim table
 
 Fill one row per claim.
+
+End the response with this exact line, on its own, and nothing after it:
 
 $SENTINEL
 EOF
@@ -304,6 +312,9 @@ check "the accounting is printed" "$(grep -q 'run accounting' "$TMP/err.txt" && 
 check "the reading assignment is printed before the spend" "$(grep -q 'reading assignment' "$TMP/err.txt" && echo 0 || echo 1)"
 check "the brief handed over names the diff range" "$(have "$FAKE_MSG" 'Reading assignment' && echo 0 || echo 1)"
 check "…and re-appends the sentinel the comment strip removed" "$(have "$FAKE_MSG" "$SENTINEL" && echo 0 || echo 1)"
+check "…with the closing instruction immediately above the sentinel" "$(closing_above_sentinel "$FAKE_MSG" && echo 0 || echo 1)"
+check "…and the injected sections sit before that instruction, not after it" \
+  "$(awk 'index($0,"Reading assignment"){r=NR} index($0,"End the response with this exact line"){i=NR} END{exit !(r && i && r<i)}' "$FAKE_MSG" && echo 0 || echo 1)"
 check "no scratch is left at the review path" "$(! ls "$REPO/.grok-review/feat-x/"*.partial.* >/dev/null 2>&1 && echo 0 || echo 1)"
 rc=$(run review code >/dev/null 2>&1; echo $?)
 check "a second run refuses to overwrite the review" "$(died $rc)"

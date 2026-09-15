@@ -27,6 +27,12 @@
 set -euo pipefail
 
 SENTINEL='<!-- END OF REVIEW -->'
+# The lens's own closing instruction, immediately above the sentinel in every shipped lens and in the
+# template below. The brief is assembled so the injected sections (reading assignment, delta, previous
+# round, project context) sit BEFORE it: a comment strip deletes the sentinel, and without this split
+# the instruction is left dangling above "## Reading assignment" — the reviewer ends the response on
+# the next heading it reads rather than on the sentinel the instruction names.
+CLOSING_INSTRUCTION='End the response with this exact line, on its own, and nothing after it:'
 MIN_BYTES=400
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -252,7 +258,7 @@ is seeded with this table, and extras are billed on every later turn. Cap: $CLAI
 - BROKEN Fn — the claim
 - UNVERIFIED — the claim
 
-End the response with this exact line, on its own, and nothing after it:
+$CLOSING_INSTRUCTION
 
 $SENTINEL
 EOF
@@ -989,8 +995,10 @@ do_review() {
   # comment"), and a reviewer that reads them is being told to do somebody else's job. Everything
   # the harness knows and the brief cannot — the diff range, the round's scope, the previous round's
   # compact state — is injected HERE and never written into $PROMPT: a SHA committed to a file goes
-  # stale on the next commit. The sentinel is re-appended last, because it is the brief's closing
-  # instruction about output format and anything after it reads as the ending.
+  # stale on the next commit. They go BETWEEN the body and the lens's closing instruction, so the
+  # last thing the reviewer reads is that instruction and the sentinel it names. `brief_body` strips
+  # the sentinel along with the comments, which leaves the instruction dangling at the end of the
+  # body — inject after that and the instruction points at "## Reading assignment" instead.
   local READING
   READING="$(cat <<EOF
 ## Reading assignment
@@ -1068,12 +1076,21 @@ EOF
   fi
 
   local BRIEF; BRIEF="$(mktemp "$OUT.brief.XXXXXX")"
-  { printf '%s\n' "$BODY"
+  # Split the body at the closing instruction so the injected sections land before it. The instruction
+  # may be absent in a hand-written lens; then the body is the lead and the sentinel still finishes the
+  # brief, only without the ordering guarantee.
+  local LEAD="$BODY" TAIL=""
+  if grep -qF -- "$CLOSING_INSTRUCTION" <<<"$BODY"; then
+    LEAD="$(awk -v c="$CLOSING_INSTRUCTION" 'index($0,c){exit} {print}' <<<"$BODY")"
+    TAIL="$(awk -v c="$CLOSING_INSTRUCTION" 'index($0,c){f=1} f{print}' <<<"$BODY")"
+  fi
+  { printf '%s\n' "$LEAD"
     printf '\n%s\n' "$READING"
     [ -z "$DELTA_NOTE" ]   || printf '\n%s\n' "$DELTA_NOTE"
     [ -z "$PREV_NOTE" ]    || printf '\n%s\n' "$PREV_NOTE"
     [ -z "$CONTEXT_NOTE" ] || printf '\n%s\n' "$CONTEXT_NOTE"
-    printf '\n%s\n' "$SENTINEL"
+    [ -z "$TAIL" ]         || printf '\n%s\n' "$TAIL"
+    printf '%s\n' "$SENTINEL"
   } > "$BRIEF"
 
   # Omitted, not defaulted: passing --model "" would be an error, and passing a value invented here
