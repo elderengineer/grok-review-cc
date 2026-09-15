@@ -1,6 +1,6 @@
 {
   "name": "grok",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Independent second-opinion code review by Grok, from Claude Code, inside grok's own read-only sandbox.",
   "author": {
     "name": "Alan Ho"
