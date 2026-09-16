@@ -40,13 +40,17 @@ PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 DEFAULT_LENS_DIR="$PLUGIN_DIR/lenses"
 
 GROK_BIN="${GROK_BIN:-$(command -v grok || echo "$HOME/.grok/bin/grok")}"
-# Unset = whatever the grok CLI itself is configured to use (`[models] default` and
-# `default_reasoning_effort` in ~/.grok/config.toml), because --model/--effort are simply not passed.
-# A pin here is a second source of truth for the reviewer's identity and it drifts silently.
-# Unpinned is not unrecorded — the model that actually answered is read back off the result and
-# stamped on the review file.
+# The model stays UNPINNED on purpose: --model is not passed, so grok uses `[models] default` from
+# ~/.grok/config.toml, and the model that actually answered is read back off the result and stamped
+# on the review file. Pinning it here would be a second source of truth for the reviewer's identity,
+# and it drifts silently.
+#
+# Effort IS pinned, defaulting to `medium`. Leaving it unpinned handed the tier to
+# `default_reasoning_effort` in ~/.grok/config.toml, and an `xhigh` default is how a 466-line diff
+# became a 41-turn, multi-million-token run. Override it per run with `--effort <level>` or set
+# GROK_REVIEW_EFFORT. Canonical levels: none, minimal, low, medium, high, xhigh, max.
 MODEL="${GROK_REVIEW_MODEL:-}"
-EFFORT="${GROK_REVIEW_EFFORT:-}"
+EFFORT="${GROK_REVIEW_EFFORT:-medium}"
 TIMEOUT_SECS="${GROK_REVIEW_TIMEOUT:-1800}"
 SANDBOX="${GROK_REVIEW_SANDBOX:-grok-review}"
 
@@ -91,6 +95,9 @@ options for init / review:
                   pays again for the rounds already reviewed
   --base <ref>    the branch this change is measured against. Default: origin's default branch,
                   else main/master/develop/trunk, whichever resolves first
+  --effort <lvl>  reasoning effort for the reviewer: none|minimal|low|medium|high|xhigh|max.
+                  Default: medium (GROK_REVIEW_EFFORT). The reviewer re-sends its whole context on
+                  every step, so this is the single biggest cost lever.
   --force         overwrite an existing brief (init) or review file (review)
   --force-size    run even though the diff exceeds GROK_REVIEW_MAX_DIFF_LINES
   --parallel      run even though another review holds .grok-review/.running
@@ -720,6 +727,7 @@ parse_run_args() {
       --round)  [ $# -ge 2 ] || usage; ROUND="$2"; shift 2 ;;
       --since)  [ $# -ge 2 ] || usage; SINCE="$2"; shift 2 ;;
       --base)   [ $# -ge 2 ] || usage; BASE="$2";  shift 2 ;;
+      --effort) [ $# -ge 2 ] || usage; EFFORT="$2"; shift 2 ;;
       --full)       FULL=1;       shift ;;
       --force)      FORCE=1;      shift ;;
       # Claude's flag, not the harness's: Phase B is Claude editing host-side after the run, and
@@ -945,10 +953,12 @@ do_review() {
   DIFF_CMD="git diff $DIFF_FROM...HEAD"
 
   # --- the size budget ---
-  # Measure what the reviewer is about to pull into context, and ALWAYS say it out loud: the author
-  # who cannot see what a run is about to read has no way to judge whether it is affordable. The
-  # diff is piped straight into `wc` and never written to a file — the reviewer running its OWN
-  # `git diff` is the property that lets it read selectively.
+  # Measure what the reviewer is about to pull into context, and say it out loud BEFORE any spend.
+  # Over GROK_REVIEW_MAX_DIFF_LINES the run REFUSES by default: the reviewer re-sends its whole
+  # context on every step, so the diff is paid many times over, and a monolithic read is the shape
+  # that runs up a bill unnoticed. --force-size is the explicit override. The diff is piped straight
+  # into `wc` and never written to a file — the reviewer running its OWN `git diff` is the property
+  # that lets it read selectively.
   read -r DIFF_LINES DIFF_BYTES < <(git diff "$DIFF_FROM...HEAD" | wc -lc)
   FILES_CHANGED="$(git diff --name-only "$DIFF_FROM...HEAD" | wc -l | tr -d ' ')"
   say "reading assignment — $DIFF_CMD: $FILES_CHANGED file(s), $DIFF_LINES lines / $DIFF_BYTES bytes$([ "$DELTA" -eq 1 ] && echo " (DELTA — the rest of the branch is already reviewed)")"
@@ -962,16 +972,11 @@ do_review() {
     die "$DIFF_CMD is empty — nothing to review. A run on an empty range still costs a full agentic loop and would be promoted as a review that found nothing."
 
   if [ "$DIFF_LINES" -gt "$MAX_DIFF_LINES" ] && [ "$FORCE_SIZE" -ne 1 ]; then
-    local SIZE_MSG="the change is $DIFF_LINES lines (budget $MAX_DIFF_LINES, GROK_REVIEW_MAX_DIFF_LINES). The reviewer re-sends its whole context on every step, so every line it reads is billed many times over. Review the DELTA since the last round (--since <ref>), or split the change."
-    # Big-but-not---full is only a WARNING, and that is a real difference from a harness that hands
-    # the diff over as a file rather than laxity: the hazard the budget targets is the MONOLITHIC
-    # read, and grok defuses it by construction — it runs its own `git diff`, per file and per hunk.
-    # What the budget still buys is VISIBILITY of the size before the spend. The one shape that gets
-    # refused is the one that re-buys an already-reviewed branch in full: --full on a re-review.
-    if [ "$FULL" -eq 1 ] && [ -n "$ROUND" ]; then
-      die "--full on round $ROUND: $SIZE_MSG Pass --force-size only if you have decided to pay it."
-    fi
-    say "WARNING — $SIZE_MSG"
+    # Refused by default, not warned: the reviewer re-sends its whole context on every step, so the
+    # diff is billed many times over, and the size is exactly what the author cannot feel from the
+    # line count alone. The ways out are all named in the message, and --force-size is the one that
+    # says "I have decided to pay this".
+    die "the change is $DIFF_LINES lines, over the budget of $MAX_DIFF_LINES (GROK_REVIEW_MAX_DIFF_LINES). The reviewer re-sends its whole context on every step, so every line it reads is billed many times over — a run this size is refused by default. Review the DELTA since the last round (--round N, or --since <ref>), split the change, or raise GROK_REVIEW_MAX_DIFF_LINES. Pass --force-size only if you have decided to pay for this run anyway."
   fi
 
   # What the tree looks like before an independent reviewer touches it. Scratch paths are
@@ -981,7 +986,7 @@ do_review() {
   TREE_BEFORE="$(git status --porcelain)"
   HEAD_BEFORE="$(git rev-parse HEAD)"
 
-  say "$LENS${SUFFIX:+ (round $ROUND)} on '$TOPIC'  [${MODEL:-grok CLI default} model, effort ${EFFORT:-grok CLI default}, sandbox $SANDBOX, timeout ${TIMEOUT_SECS}s]"
+  say "$LENS${SUFFIX:+ (round $ROUND)} on '$TOPIC'  [${MODEL:-grok CLI default} model, effort $EFFORT, sandbox $SANDBOX, timeout ${TIMEOUT_SECS}s]"
   say "brief $PROMPT"
 
   # Unique per run, so the buffers cannot be shared even if the lock were ever bypassed. The lock
@@ -1216,7 +1221,7 @@ EOF
   # is the one thing this script must never leave behind.
   local STAMPED; STAMPED="$(mktemp "$OUT.partial.XXXXXX")"
   { printf '<!-- run-review.sh: %s review%s of %s by %s, effort %s, %s. Not part of the review. -->\n\n' \
-      "$LENS" "${ROUND:+ round $ROUND}" "$TOPIC" "${MODEL_USED:-model unreported}" "${EFFORT:-grok CLI default}" "$DIFF_CMD"
+      "$LENS" "${ROUND:+ round $ROUND}" "$TOPIC" "${MODEL_USED:-model unreported}" "$EFFORT" "$DIFF_CMD"
     cat "$PARTIAL"
   } > "$STAMPED"
   chmod 0644 "$STAMPED"   # mktemp makes it 0600; the review is ordinary scratch, not a secret

@@ -15,7 +15,9 @@ This command is the opencode / ZCode entry point for the portable `grok-review` 
    and ask which lens to review through):
 
    - `setup [--force] [--no-probe]` — `bash <skill-dir>/scripts/run-review.sh setup …`. Relay every
-     missing-requirement fix command it prints; do not install anything yourself.
+     missing-requirement fix command it prints; do not install anything yourself. Its closing `Next:`
+     line names `/grok:review` (Claude Code's namespaced command); here the equivalent is
+     `/grok-review review <lens>`, or `init <lens>` then `review`.
    - `lenses` — `… run-review.sh lenses`, present the table.
    - `lenses new <name> [--from <lens>]` — `… run-review.sh new-lens <name> …`, then help edit it.
    - `init <lens> [options]` — `… run-review.sh init …`, then write the four brief sections.

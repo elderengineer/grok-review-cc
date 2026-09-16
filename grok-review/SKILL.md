@@ -56,8 +56,10 @@ shipped lenses from `<skill-dir>/lenses`.
 | `assert-clean` | refuse if any `.grok-review` file is staged for commit |
 
 Options for `init` / `review`: `--topic <slug>`, `--round <N>`, `--since <ref>`, `--full`,
-`--base <ref>`, `--force`, `--force-size`, `--parallel`. `--fix` is **yours, not the harness's** —
-it changes nothing about the run, only what you do afterwards (see Phase B below).
+`--base <ref>`, `--effort <level>`, `--force`, `--force-size`, `--parallel`. `--effort` is
+`none|minimal|low|medium|high|xhigh|max` and defaults to `medium` (also `GROK_REVIEW_EFFORT`). `--fix`
+is **yours, not the harness's** — it changes nothing about the run, only what you do afterwards (see
+Phase B below).
 
 ## The workflow
 
@@ -70,6 +72,10 @@ bash <skill-dir>/scripts/run-review.sh setup
 Present the output verbatim. If the last line reads `setup OK`, the harness is ready. Every missing
 requirement is printed with the exact command that fixes it — relay those; do not run installs
 yourself. If a probe verdict failed, no review can run until it passes.
+
+The harness's closing `Next:` line names `/grok:review`, which is Claude Code's namespaced command.
+Outside Claude Code there is no such command — translate it to `/grok-review review <lens>` (or run
+`init <lens>` and then `review`). Do not relay `/grok:review` as something to type.
 
 ### 2. Pick a lens
 
@@ -178,8 +184,11 @@ should you:
 - **Round N is seeded with round N−1's capped claim table and the disposition file**, not the whole
   previous review. A re-review with no recorded head refuses rather than quietly re-buying the branch;
   `--full` is the explicit opt-out.
-- **The size is printed on every run**, over budget or not; `GROK_REVIEW_MAX_DIFF_LINES` warns, and
-  `--force-size` overrides.
+- **Effort is pinned to `medium` by default** — the biggest single lever on the burn. Raise it with
+  `--effort <level>` or `GROK_REVIEW_EFFORT` only when the change warrants the spend.
+- **The size is printed on every run**, over budget or not; past `GROK_REVIEW_MAX_DIFF_LINES` the run
+  refuses by default (the reviewer re-sends its whole context every step), and `--force-size` is the
+  deliberate override.
 - **The ledger** (`.grok-review/usage.log`) gets a row per attempt, failures included. In it `in_tok`
   is uncached input only; `total_tok` is the burn signal; an empty `cost` means the server reported an
   incomplete cost — unknown, never free.

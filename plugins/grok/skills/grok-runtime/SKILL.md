@@ -100,12 +100,17 @@ tool result sits in the context and is re-sent on every step after it — so wha
 multiplied by how long the run turns out to be, and none of that multiplier is visible to whoever
 launched it.
 
+- **Effort is pinned to `medium` by default** — the biggest single lever on the burn. Unpinned, the
+  tier comes from `default_reasoning_effort` in `~/.grok/config.toml`, which is how a small diff can
+  run at `xhigh` and cost millions of tokens. Override with `--effort <level>` or
+  `GROK_REVIEW_EFFORT` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`).
 - **`--since <ref>` scopes the reviewer to the delta**, and with `--round N` it is the DEFAULT: round
   N−1 recorded its head, round N reads that and diffs from it. A re-review with no recorded head
   **refuses** rather than quietly re-buying the whole branch. `--full` is the explicit opt-out.
-- **The size is printed on every run**, over budget or not. Over `GROK_REVIEW_MAX_DIFF_LINES` (2500)
-  it warns; it refuses only `--full` on a re-review, the one shape that re-buys an already-reviewed
-  branch in full. `--force-size` overrides.
+- **The size is printed on every run**, over budget or not. Past `GROK_REVIEW_MAX_DIFF_LINES` (2500)
+  it **refuses by default** — the reviewer re-sends its whole context every step, so the diff is paid
+  many times over, and `--full` is not special-cased: it is the same gate. `--force-size` is the
+  deliberate override.
 - **The ledger** (`.grok-review/usage.log`) gets a row per attempt, success and failure alike.
   `in_tok` is uncached input only; `total_tok` is the burn signal; an empty `cost` means the server
   reported an incomplete cost — unknown, never free.
