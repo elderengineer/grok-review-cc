@@ -55,6 +55,42 @@ claims, and starts the review in the background.
 > change to the profile fixes it. `/grok:setup` spots this pair and prints the fix:
 > `export GROK_BIN=$HOME/.grok/downloads/grok-1.0.5-linux-x86_64`.
 
+## Other agents (opencode, ZCode, …)
+
+Claude Code is not the only host. The harness, the lenses and the brief are agent-agnostic; the
+plugin packaging is not. `install.sh` installs the portable parts for agents that follow the shared
+`SKILL.md` + markdown-command conventions — opencode, ZCode, and anything else that scans
+`~/.agents/skills`:
+
+```bash
+./install.sh            # symlink the skill into ~/.agents/skills, write the /grok-review command
+./install.sh --copy     # copy it instead, so the install is self-contained
+./install.sh --uninstall
+```
+
+It writes three files, and nothing else:
+
+- `~/.agents/skills/grok-review/` — the skill. It carries `scripts/run-review.sh`, the lenses, and
+  the confinement notes; the script self-locates them. opencode reads `~/.agents/skills`
+  automatically, and so does Claude Code; ZCode reads it (and `<repo>/.agents/skills`) too.
+- `~/.config/opencode/commands/grok-review.md` — the `/grok-review` command for opencode.
+- `~/.zcode/commands/grok-review.md` — the same command for ZCode.
+
+One entry point covers every verb:
+
+```
+/grok-review setup                 # check the machine and measure the sandbox
+/grok-review review code --fix      # review the branch, then apply the findings
+/grok-review review code --round 2  # review only what changed since round 1
+/grok-review status                 # is a review running, what was reviewed last
+```
+
+There is no plugin namespace outside Claude Code, so it is `/grok-review`, not `/grok:review`.
+`$ARGUMENTS` works the same way, so `--fix`, `--round` and the rest pass straight through.
+
+Claude Code keeps using the plugin and `/grok:review`, `/grok:status`, … — but it also reads
+`~/.agents/skills`, so the skill route works there too if you only want the model-invoked form.
+
 ## How a review works
 
 You pick a lens. Claude writes a brief. Grok reads the code and answers.
@@ -236,6 +272,9 @@ plugins/grok/
   scripts/run-review.sh  the one script: checks, sandbox, budget, log, lock, probe
   skills/grok-runtime/   SKILL.md and reference/confinement.md
   tests/test-run-review.sh
+grok-review/             the portable skill: SKILL.md + symlinks into plugins/grok (scripts, lenses, reference)
+commands/grok-review.md  the single /grok-review command for opencode and ZCode
+install.sh               install the skill + command into ~/.agents/skills and the host command dirs
 ```
 
 Each repository you review keeps its files in `<repo>/.grok-review/`, which setup adds to
