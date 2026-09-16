@@ -55,6 +55,44 @@ claims, and starts the review in the background.
 > change to the profile fixes it. `/grok:setup` spots this pair and prints the fix:
 > `export GROK_BIN=$HOME/.grok/downloads/grok-1.0.5-linux-x86_64`.
 
+## Other agents (opencode, ZCode, …)
+
+Claude Code is not the only host. The harness, the lenses and the brief are agent-agnostic; the
+plugin packaging is not. `install.sh` installs the portable parts for agents that follow the shared
+`SKILL.md` + markdown-command conventions — opencode, ZCode, and anything else that scans
+`~/.agents/skills`:
+
+```bash
+./install.sh            # symlink the skill into ~/.agents/skills, write the /grok-review command
+./install.sh --copy     # copy it instead, so the install is self-contained
+./install.sh --uninstall
+```
+
+It writes three files, and nothing else:
+
+- `~/.agents/skills/grok-review/` — the skill. It carries `scripts/run-review.sh`, the lenses, and
+  the confinement notes; the script self-locates them. opencode and ZCode read `~/.agents/skills`
+  automatically, and ZCode also reads `<repo>/.agents/skills`. Claude Code does not discover it
+  live — its route is the plugin below — though it can import skills from that directory.
+- `~/.config/opencode/commands/grok-review.md` — the `/grok-review` command for opencode.
+- `~/.zcode/commands/grok-review.md` — the same command for ZCode.
+
+One entry point covers every verb:
+
+```
+/grok-review setup                 # check the machine and measure the sandbox
+/grok-review review code --fix      # review the branch, then apply the findings
+/grok-review review code --round 2  # review only what changed since round 1
+/grok-review status                 # is a review running, what was reviewed last
+```
+
+There is no plugin namespace outside Claude Code, so it is `/grok-review`, not `/grok:review`.
+`$ARGUMENTS` works the same way, so `--fix`, `--round` and the rest pass straight through.
+
+Claude Code keeps using the plugin and `/grok:review`, `/grok:status`, … — the portable skill route
+is for opencode and ZCode. (For the model-invoked form in Claude Code, link the skill into
+`~/.claude/skills/`, or just use the plugin.)
+
 ## How a review works
 
 You pick a lens. Claude writes a brief. Grok reads the code and answers.
@@ -197,14 +235,20 @@ Grok is an agent, so the output of the `git diff` it runs becomes part of its co
 context is re-sent on every step. A small diff can cost a lot. In the first real run of this plugin,
 a 14-line diff used 244,839 tokens across 7 turns.
 
-Five things keep that in check:
+Six things keep that in check:
 
+- **Reasoning effort is pinned to `medium`.** It is the single biggest lever on the burn: left
+  unpinned, the tier comes from `default_reasoning_effort` in `~/.grok/config.toml`, and an `xhigh`
+  default is how a 466-line diff became a 41-turn, multi-million-token run. Override with
+  `--effort <level>` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) or
+  `GROK_REVIEW_EFFORT`.
 - **A second review only looks at what changed.** Round 1 records the commit it reviewed, and round
   2 diffs from there. If there is no recorded commit, the run stops instead of quietly re-reading
   the whole branch. Use `--full` if you really want the whole thing.
 - **You see the size before you pay for it.** Every run prints the file count, line count and byte
-  count first. Past `GROK_REVIEW_MAX_DIFF_LINES` (2500) it warns, and it refuses `--full` on a
-  second review.
+  count first, and past `GROK_REVIEW_MAX_DIFF_LINES` (2500) it **refuses** by default — the reviewer
+  re-sends its whole context every step, so a big diff is paid many times over. `--force-size` is the
+  deliberate override when you have decided to pay it.
 - **Every attempt is logged** to `.grok-review/usage.log`, including failed ones. `/grok:usage`
   prints it. Note that `in_tok` counts uncached input only, `total_tok` is the real number to watch,
   and an empty cost column means the server did not report a cost. Empty means unknown, not free.
@@ -236,6 +280,9 @@ plugins/grok/
   scripts/run-review.sh  the one script: checks, sandbox, budget, log, lock, probe
   skills/grok-runtime/   SKILL.md and reference/confinement.md
   tests/test-run-review.sh
+grok-review/             the portable skill: SKILL.md + symlinks into plugins/grok (scripts, lenses, reference)
+commands/grok-review.md  the single /grok-review command for opencode and ZCode
+install.sh               install the skill + command into ~/.agents/skills and the host command dirs
 ```
 
 Each repository you review keeps its files in `<repo>/.grok-review/`, which setup adds to

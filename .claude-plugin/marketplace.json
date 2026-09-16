@@ -6,13 +6,13 @@
     "name": "Alan Ho"
   },
   "metadata": {
-    "version": "0.1.1"
+    "version": "0.2.0"
   },
   "plugins": [
     {
       "name": "grok",
       "description": "Independent second-opinion code review by Grok, from Claude Code, inside grok's own read-only sandbox.",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "author": {
         "name": "Alan Ho"
       },

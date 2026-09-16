@@ -63,6 +63,7 @@ brief=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --prompt-file) brief="$2"; shift 2 ;;
+    --effort) printf 'effort %s\n' "$2" >>"$FAKE_LOG"; shift 2 ;;
     --version) echo "grok 1.0.5 (fake)"; exit 0 ;;
     *) shift ;;
   esac
@@ -371,13 +372,22 @@ git -C "$REPO" checkout -q feat-x
 
 mkdir -p "$REPO/.grok-review/sizebudget"
 good_brief "$REPO/.grok-review/sizebudget/code-review-prompt.md"
-err="$(GROK_REVIEW_MAX_DIFF_LINES=1 FAKE_MODE=ok run review code --topic sizebudget 2>&1 >/dev/null)"; rc=$?
-check "over the size budget it warns but runs" "$(lived $rc)"
+err="$(GROK_REVIEW_MAX_DIFF_LINES=1 run review code --topic sizebudget 2>&1 >/dev/null)"; rc=$?
+check "over the size budget a run is refused by default" "$(died $rc)"
 check "…printing the budget message" "$(grep -q 'budget' <<<"$err" && echo 0 || echo 1)"
-good_brief "$REPO/.grok-review/sizebudget/code-review-r2-prompt.md"
-err="$(GROK_REVIEW_MAX_DIFF_LINES=1 run review code --topic sizebudget --round 2 --full 2>&1 >/dev/null)"; rc=$?
-check "--full on a re-review over budget is refused" "$(died $rc)"
 check "…naming --force-size as the deliberate override" "$(grep -q 'force-size' <<<"$err" && echo 0 || echo 1)"
+err="$(GROK_REVIEW_MAX_DIFF_LINES=1 FAKE_MODE=ok run review code --topic sizebudget --force-size 2>&1 >/dev/null)"; rc=$?
+check "--force-size runs the over-budget review anyway" "$(lived $rc)"
+
+banner "effort is pinned"
+mkdir -p "$REPO/.grok-review/effort"
+good_brief "$REPO/.grok-review/effort/code-review-prompt.md"
+: >"$FAKE_LOG"
+run review code --topic effort >/dev/null 2>&1 || true
+check "a review passes --effort medium by default" "$(grep -q 'effort medium' "$FAKE_LOG" && echo 0 || echo 1)"
+: >"$FAKE_LOG"
+run review code --topic effort --force --effort xhigh >/dev/null 2>&1 || true
+check "…and --effort forwards another level" "$(grep -q 'effort xhigh' "$FAKE_LOG" && echo 0 || echo 1)"
 
 # ==================================================================================================
 banner "the repo-wide run marker"

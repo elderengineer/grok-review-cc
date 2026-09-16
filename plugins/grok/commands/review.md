@@ -1,6 +1,6 @@
 ---
 description: Get an independent second-opinion review from Grok through one lens — you write the brief, Grok reviews the branch inside a read-only sandbox; add `--fix` to apply the findings afterwards
-argument-hint: '[<lens>] [--topic <slug>] [--round <N>] [--since <ref>|--full] [--base <ref>] [--fix] [--force] [--force-size] [--parallel]'
+argument-hint: '[<lens>] [--topic <slug>] [--round <N>] [--since <ref>|--full] [--base <ref>] [--effort <level>] [--fix] [--force] [--force-size] [--parallel]'
 disable-model-invocation: true
 allowed-tools: Bash(bash:*), Bash(cat:*), Bash(git:*), Read, Edit, Write, Grep, Glob
 ---
