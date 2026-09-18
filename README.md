@@ -248,7 +248,10 @@ Six things keep that in check:
 - **You see the size before you pay for it.** Every run prints the file count, line count and byte
   count first, and past `GROK_REVIEW_MAX_DIFF_LINES` (2500) it **refuses** by default — the reviewer
   re-sends its whole context every step, so a big diff is paid many times over. `--force-size` is the
-  deliberate override when you have decided to pay it.
+  deliberate override when you have decided to pay it. Files `.gitattributes` marks
+  `linguist-generated` (drizzle snapshots, lockfiles, codegen output) are excluded from the count and
+  from the diff command the reviewer runs — the assignment line names what was left out — and
+  `GROK_REVIEW_INCLUDE_GENERATED=1` counts them again when a generated file is the subject.
 - **Every attempt is logged** to `.grok-review/usage.log`, including failed ones. `/grok:usage`
   prints it. Note that `in_tok` counts uncached input only, `total_tok` is the real number to watch,
   and an empty cost column means the server did not report a cost. Empty means unknown, not free.

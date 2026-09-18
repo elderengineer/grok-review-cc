@@ -110,7 +110,9 @@ launched it.
 - **The size is printed on every run**, over budget or not. Past `GROK_REVIEW_MAX_DIFF_LINES` (2500)
   it **refuses by default** — the reviewer re-sends its whole context every step, so the diff is paid
   many times over, and `--full` is not special-cased: it is the same gate. `--force-size` is the
-  deliberate override.
+  deliberate override. Files `.gitattributes` marks `linguist-generated` are excluded from the count
+  and from the reviewer's diff command; the assignment line names them, and
+  `GROK_REVIEW_INCLUDE_GENERATED=1` counts them again.
 - **The ledger** (`.grok-review/usage.log`) gets a row per attempt, success and failure alike.
   `in_tok` is uncached input only; `total_tok` is the burn signal; an empty `cost` means the server
   reported an incomplete cost — unknown, never free.

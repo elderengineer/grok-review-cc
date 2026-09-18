@@ -379,6 +379,39 @@ check "…naming --force-size as the deliberate override" "$(grep -q 'force-size
 err="$(GROK_REVIEW_MAX_DIFF_LINES=1 FAKE_MODE=ok run review code --topic sizebudget --force-size 2>&1 >/dev/null)"; rc=$?
 check "--force-size runs the over-budget review anyway" "$(lived $rc)"
 
+# ==================================================================================================
+banner "linguist-generated files are excluded from the budget"
+git -C "$REPO" checkout -q main
+git -C "$REPO" checkout -q -b gen-y
+printf 'gen/*.json linguist-generated\n' > "$REPO/.gitattributes"
+mkdir -p "$REPO/gen"
+python3 -c 'import sys; open(sys.argv[1] + "/gen/snap.json", "w").write("{\n" * 300)' "$REPO"
+printf 'a hand-written note\n' > "$REPO/gen/note.txt"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm "migration plus a generated snapshot"
+mkdir -p "$REPO/.grok-review/geny"
+good_brief "$REPO/.grok-review/geny/code-review-prompt.md"
+err="$(GROK_REVIEW_MAX_DIFF_LINES=50 FAKE_MODE=ok run review code --topic geny 2>&1 >/dev/null)"; rc=$?
+check "a 300-line generated file is excluded: the run fits a 50-line budget" "$(lived $rc)"
+check "…the assignment names the excluded file" "$(grep -q '1 generated file(s) excluded: gen/snap.json' <<<"$err" && echo 0 || echo 1)"
+check "…the reviewer's command carries the exclude pathspec" "$(grep -qF ':(exclude,literal)gen/snap.json' "$FAKE_MSG" && echo 0 || echo 1)"
+check "…the brief says the excluded files are out of scope" "$(grep -q 'do not widen the command back out' "$FAKE_MSG" && echo 0 || echo 1)"
+check "…the ledger counts the post-exclusion diff" "$(awk -F'\t' '$2=="geny" && $6=="ok" && $7 < 50 {n++} END{exit !(n>=1)}' "$REPO/.grok-review/usage.log" && echo 0 || echo 1)"
+
+rm -f "$REPO/.grok-review/geny/code-review.md"
+err="$(GROK_REVIEW_MAX_DIFF_LINES=50 GROK_REVIEW_INCLUDE_GENERATED=1 run review code --topic geny 2>&1 >/dev/null)"; rc=$?
+check "GROK_REVIEW_INCLUDE_GENERATED=1 counts generated files again" "$(died $rc)"
+check "…and says so before the spend" "$(grep -q 'GROK_REVIEW_INCLUDE_GENERATED=1' <<<"$err" && echo 0 || echo 1)"
+
+git -C "$REPO" checkout -q -b gen-all
+printf '* linguist-generated\n' > "$REPO/.gitattributes"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm "mark everything generated"
+mkdir -p "$REPO/.grok-review/genall"
+good_brief "$REPO/.grok-review/genall/code-review-prompt.md"
+err="$(run review code --topic genall 2>&1 >/dev/null)"; rc=$?
+check "an all-generated diff refuses with its own message" "$(died $rc)"
+check "…naming the escape hatch" "$(grep -q 'GROK_REVIEW_INCLUDE_GENERATED=1' <<<"$err" && echo 0 || echo 1)"
+git -C "$REPO" checkout -q feat-x
+
 banner "effort is pinned"
 mkdir -p "$REPO/.grok-review/effort"
 good_brief "$REPO/.grok-review/effort/code-review-prompt.md"
