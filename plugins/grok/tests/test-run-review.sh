@@ -379,6 +379,88 @@ check "…naming --force-size as the deliberate override" "$(grep -q 'force-size
 err="$(GROK_REVIEW_MAX_DIFF_LINES=1 FAKE_MODE=ok run review code --topic sizebudget --force-size 2>&1 >/dev/null)"; rc=$?
 check "--force-size runs the over-budget review anyway" "$(lived $rc)"
 
+# ==================================================================================================
+banner "linguist-generated files are excluded from the budget"
+git -C "$REPO" checkout -q main
+git -C "$REPO" checkout -q -b gen-y
+printf 'gen/*.json linguist-generated\ngen/valued.snap linguist-generated=1\ngen/plain.snap linguist-generated=false\n' > "$REPO/.gitattributes"
+mkdir -p "$REPO/gen"
+python3 -c 'import sys; open(sys.argv[1] + "/gen/snap.json", "w").write("{\n" * 300)' "$REPO"
+printf 'v\nv\nv\nv\nv\n' > "$REPO/gen/valued.snap"
+printf 'p\np\np\np\np\n' > "$REPO/gen/plain.snap"
+printf 'a hand-written note\n' > "$REPO/gen/note.txt"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm "migration plus generated snapshots"
+mkdir -p "$REPO/.grok-review/geny"
+good_brief "$REPO/.grok-review/geny/code-review-prompt.md"
+err="$(GROK_REVIEW_MAX_DIFF_LINES=50 FAKE_MODE=ok run review code --topic geny 2>&1 >/dev/null)"; rc=$?
+check "300 generated lines are excluded: the run fits a 50-line budget" "$(lived $rc)"
+check "…the assignment names the excluded files and lines saved" "$(grep -qE '2 generated file\(s), ~[0-9]+ lines excluded: gen/snap\.json gen/valued\.snap' <<<"$err" && echo 0 || echo 1)"
+check "…the reviewer's command carries the exclude pathspecs" "$(grep -qF ':(exclude,literal)gen/snap.json' "$FAKE_MSG" && grep -qF ':(exclude,literal)gen/valued.snap' "$FAKE_MSG" && echo 0 || echo 1)"
+check "…a valued attribute form (=1) counts as generated" "$(grep -qF ':(exclude,literal)gen/valued.snap' "$FAKE_MSG" && echo 0 || echo 1)"
+check "…but linguist-generated=false does NOT exclude" "$(! grep -qF ':(exclude,literal)gen/plain.snap' "$FAKE_MSG" && echo 0 || echo 1)"
+check "…the brief keeps generated files readable as context only" "$(grep -q 'only as context for a' "$FAKE_MSG" && echo 0 || echo 1)"
+check "…and says the command must not be widened back out" "$(grep -qi 'widen the command back out' "$FAKE_MSG" && echo 0 || echo 1)"
+check "…the ledger counts the post-exclusion diff" "$(awk -F'\t' '$2=="geny" && $6=="ok" && $7 < 50 {n++} END{exit !(n>=1)}' "$REPO/.grok-review/usage.log" && echo 0 || echo 1)"
+
+rm -f "$REPO/.grok-review/geny/code-review.md"
+err="$(GROK_REVIEW_MAX_DIFF_LINES=50 GROK_REVIEW_INCLUDE_GENERATED=1 run review code --topic geny 2>&1 >/dev/null)"; rc=$?
+check "GROK_REVIEW_INCLUDE_GENERATED=1 counts generated files again" "$(died $rc)"
+check "…and says so before the spend" "$(grep -q 'GROK_REVIEW_INCLUDE_GENERATED=1' <<<"$err" && echo 0 || echo 1)"
+
+# 14 generated files: the assignment lists 12 and folds the rest
+git -C "$REPO" checkout -q -b gen-many main
+printf 'many/* linguist-generated\n' > "$REPO/.gitattributes"
+mkdir -p "$REPO/many"
+for i in $(seq 1 14); do printf 'x\n' > "$REPO/many/f$i.json"; done
+printf 'hand-written\n' > "$REPO/keep.txt"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm "fourteen generated files"
+mkdir -p "$REPO/.grok-review/genmany"
+good_brief "$REPO/.grok-review/genmany/code-review-prompt.md"
+err="$(GROK_REVIEW_MAX_DIFF_LINES=50 FAKE_MODE=ok run review code --topic genmany 2>&1 >/dev/null)"; rc=$?
+check "14 generated files exclude and the review runs" "$(lived $rc)"
+check "…the assignment lists 12 and folds the rest" "$(grep -q '14 generated file(s)' <<<"$err" && grep -q '(+2 more)' <<<"$err" && echo 0 || echo 1)"
+check "…the brief folds its list the same way" "$(grep -qF '…and 2 more' "$FAKE_MSG" && echo 0 || echo 1)"
+
+# 101 generated paths: past the command-spec cap the command stays plain and the note
+# carries the recipe instead — the count still excludes (the budget passes at 50)
+git -C "$REPO" checkout -q -b gen-bulk main
+printf 'bulk/* linguist-generated\n' > "$REPO/.gitattributes"
+mkdir -p "$REPO/bulk"
+for i in $(seq 1 101); do printf 'x\n' > "$REPO/bulk/f$i.json"; done
+printf 'hand-written\n' > "$REPO/keep.txt"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm "a hundred and one generated files"
+mkdir -p "$REPO/.grok-review/genbulk"
+good_brief "$REPO/.grok-review/genbulk/code-review-prompt.md"
+err="$(GROK_REVIEW_MAX_DIFF_LINES=50 FAKE_MODE=ok run review code --topic genbulk 2>&1 >/dev/null)"; rc=$?
+check "101 generated paths still exclude: the run fits the budget" "$(lived $rc)"
+check "…the command stays plain and the note carries the recipe" "$(grep -qF 'Run `git diff main...HEAD` yourself' "$FAKE_MSG" && grep -q 'not pathspec-filtered' "$FAKE_MSG" && grep -qF 'git check-attr -z --stdin linguist-generated' "$FAKE_MSG" && echo 0 || echo 1)"
+check "…the assignment still names the exclusion" "$(grep -q '101 generated file(s)' <<<"$err" && echo 0 || echo 1)"
+
+# a check-attr failure fails open, loudly, to yesterday's counting
+mkdir -p "$TMP/fakegit"
+REAL_GIT="$(command -v git)"
+cat > "$TMP/fakegit/git" <<FAKEGIT
+#!/usr/bin/env bash
+if [ "\$1" = "check-attr" ]; then echo "check-attr exploded" >&2; exit 9; fi
+exec "$REAL_GIT" "\$@"
+FAKEGIT
+chmod +x "$TMP/fakegit/git"
+rm -f "$REPO/.grok-review/genbulk/code-review.md"
+err="$(PATH="$TMP/fakegit:$PATH" FAKE_MODE=ok run review code --topic genbulk 2>&1 >/dev/null)"; rc=$?
+check "a check-attr failure fails open to counting everything" "$(lived $rc)"
+check "…loudly" "$(grep -q 'failed open' <<<"$err" && echo 0 || echo 1)"
+check "…with no exclusion in the assignment" "$(grep -q 'generated file(s)' <<<"$err" && echo 1 || echo 0)"
+
+git -C "$REPO" checkout -q -b gen-all
+printf '* linguist-generated\n' > "$REPO/.gitattributes"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm "mark everything generated"
+mkdir -p "$REPO/.grok-review/genall"
+good_brief "$REPO/.grok-review/genall/code-review-prompt.md"
+err="$(run review code --topic genall 2>&1 >/dev/null)"; rc=$?
+check "an all-generated diff refuses with its own message" "$(died $rc)"
+check "…naming the escape hatch" "$(grep -q 'GROK_REVIEW_INCLUDE_GENERATED=1' <<<"$err" && echo 0 || echo 1)"
+git -C "$REPO" checkout -q feat-x
+
 banner "effort is pinned"
 mkdir -p "$REPO/.grok-review/effort"
 good_brief "$REPO/.grok-review/effort/code-review-prompt.md"

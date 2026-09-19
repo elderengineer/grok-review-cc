@@ -104,6 +104,7 @@ options for init / review:
 
 env: GROK_BIN GROK_REVIEW_MODEL GROK_REVIEW_EFFORT GROK_REVIEW_TIMEOUT GROK_REVIEW_SANDBOX
      GROK_REVIEW_MAX_DIFF_LINES GROK_REVIEW_CLAIM_TABLE_CAP GROK_REVIEW_BASE
+     GROK_REVIEW_INCLUDE_GENERATED
 EOF
   exit 2
 }
@@ -798,6 +799,29 @@ detect_base() {
   return 1
 }
 
+# --- generated files -------------------------------------------------------------------------------
+# The linguist convention: `.gitattributes` can mark whole paths `linguist-generated` — drizzle
+# snapshots, lockfiles, codegen output. Those files bulk out a diff's line count while carrying
+# nothing to review, so the size budget excludes them by default (GROK_REVIEW_INCLUDE_GENERATED=1
+# counts them again, for the rare review whose subject IS a generated file). Attributes are read
+# from the working tree, as linguist itself reads them — a mark added by the very change under
+# review is honored. The design is shared with the opencode port (opencode-code-review#20): the
+# valued attribute form counts (`=true`, `=1`, …) — anything but unset/unspecified — EXCEPT
+# `=false`, which check-attr reports as the string "false" and which means what it says; a
+# check-attr failure fails open to yesterday's counting, loudly.
+
+sh_q() { # one word → a single-quoted shell word, paste-safe into a command line
+  local s=${1//\'/\'\\\'\'}
+  printf "'%s'" "$s"
+}
+
+linguist_generated_paths() { # <range> → changed paths marked linguist-generated, one per line
+  git diff --name-only -z "$1" |
+    git check-attr -z --stdin linguist-generated |
+    tr '\0' '\n' | paste - - - |
+    awk -F'\t' '$3 != "" && $3 != "unset" && $3 != "unspecified" && $3 != "false" { print $1 }'
+}
+
 # --- review -------------------------------------------------------------------------------------------
 do_review() {
   parse_run_args "$@"
@@ -961,7 +985,58 @@ do_review() {
   # that lets it read selectively.
   read -r DIFF_LINES DIFF_BYTES < <(git diff "$DIFF_FROM...HEAD" | wc -lc)
   FILES_CHANGED="$(git diff --name-only "$DIFF_FROM...HEAD" | wc -l | tr -d ' ')"
-  say "reading assignment — $DIFF_CMD: $FILES_CHANGED file(s), $DIFF_LINES lines / $DIFF_BYTES bytes$([ "$DELTA" -eq 1 ] && echo " (DELTA — the rest of the branch is already reviewed)")"
+
+  # Files .gitattributes marks linguist-generated are subtracted from that count AND dropped from
+  # the command the reviewer is told to run: it diffs the range itself, so excluding them from the
+  # count alone would leave its own `git diff` pulling the generated bulk into context anyway.
+  # GEN_NOTE names them on the assignment line for the same reason — silent subtraction is how a
+  # blind spot is born.
+  local GEN_NOTE="" GEN_COUNT=0 GEN_LINES=0 GEN_BYTES=0 GEN_EXCLUDES=() gen_list="" gen_p
+  if [ "${GROK_REVIEW_INCLUDE_GENERATED:-0}" = "1" ]; then
+    say "counting generated files too (GROK_REVIEW_INCLUDE_GENERATED=1) — nothing is excluded."
+  else
+    # Fail open, loudly: a check-attr failure falls back to yesterday's counting instead of
+    # refusing a review over an enhancement.
+    if ! gen_list="$(linguist_generated_paths "$DIFF_FROM...HEAD")"; then
+      say "could not read linguist-generated attributes — exclusion failed open, counting every file."
+      gen_list=""
+    fi
+    GEN_COUNT="$(grep -c . <<<"$gen_list")" || GEN_COUNT=0
+    if [ "$GEN_COUNT" -gt 0 ]; then
+      while IFS= read -r gen_p; do
+        [ -n "$gen_p" ] || continue
+        GEN_EXCLUDES+=(":(exclude,literal)$gen_p")
+      done <<<"$gen_list"
+      # Re-measured over the same range minus the generated paths: one diff, and the number IS the
+      # command below, so count and assignment cannot drift apart. GEN_LINES/GEN_BYTES record what
+      # the exclusion saved; the brief's note cites it.
+      local full_lines="$DIFF_LINES" full_bytes="$DIFF_BYTES"
+      read -r DIFF_LINES DIFF_BYTES < <(git diff "$DIFF_FROM...HEAD" -- "${GEN_EXCLUDES[@]}" | wc -lc)
+      GEN_LINES=$(( full_lines - DIFF_LINES ))
+      GEN_BYTES=$(( full_bytes - DIFF_BYTES ))
+      FILES_CHANGED=$(( FILES_CHANGED - GEN_COUNT ))
+      if [ "$DIFF_LINES" -eq 0 ]; then
+        die "every changed file is marked linguist-generated ($GEN_COUNT file(s)) — nothing hand-written to review. If the generated files ARE the subject, set GROK_REVIEW_INCLUDE_GENERATED=1."
+      fi
+      # Up to 100 excluded paths the command embeds the exclusion; past that the pathspecs would
+      # bloat the brief more than the churn they save, so DIFF_CMD stays the plain range and the
+      # brief's note carries the recipe instead (the measurement above always uses the full set).
+      if [ "$GEN_COUNT" -le 100 ]; then
+        local gen_args=""
+        for gen_p in "${GEN_EXCLUDES[@]}"; do
+          gen_args="$gen_args $(sh_q "$gen_p")"
+        done
+        DIFF_CMD="$DIFF_CMD --${gen_args}"
+      fi
+      local gen_disp
+      gen_disp="$(printf '%s\n' "$gen_list" | head -n 12 | tr '\n' ' ')"
+      gen_disp="${gen_disp% }"
+      GEN_NOTE=" ($GEN_COUNT generated file(s), ~$GEN_LINES lines excluded: $gen_disp)"
+      [ "$GEN_COUNT" -gt 12 ] && GEN_NOTE="$GEN_NOTE, … (+$((GEN_COUNT - 12)) more)"
+    fi
+  fi
+
+  say "reading assignment — $DIFF_CMD: $FILES_CHANGED file(s), $DIFF_LINES lines / $DIFF_BYTES bytes$GEN_NOTE$([ "$DELTA" -eq 1 ] && echo " (DELTA — the rest of the branch is already reviewed)")"
 
   # An empty range is refused BEFORE the budget check, because the budget cannot catch it: `0 > 2500`
   # is false, so a no-op would sail through every later gate. A run on an empty diff is not merely
@@ -976,7 +1051,7 @@ do_review() {
     # diff is billed many times over, and the size is exactly what the author cannot feel from the
     # line count alone. The ways out are all named in the message, and --force-size is the one that
     # says "I have decided to pay this".
-    die "the change is $DIFF_LINES lines, over the budget of $MAX_DIFF_LINES (GROK_REVIEW_MAX_DIFF_LINES). The reviewer re-sends its whole context on every step, so every line it reads is billed many times over — a run this size is refused by default. Review the DELTA since the last round (--round N, or --since <ref>), split the change, or raise GROK_REVIEW_MAX_DIFF_LINES. Pass --force-size only if you have decided to pay for this run anyway."
+    die "the change is $DIFF_LINES lines$([ "$GEN_COUNT" -gt 0 ] && echo " after excluding $GEN_COUNT generated file(s) (~$GEN_LINES lines)"), over the budget of $MAX_DIFF_LINES (GROK_REVIEW_MAX_DIFF_LINES). The reviewer re-sends its whole context on every step, so every line it reads is billed many times over — a run this size is refused by default. Review the DELTA since the last round (--round N, or --since <ref>), split the change, or raise GROK_REVIEW_MAX_DIFF_LINES. Pass --force-size only if you have decided to pay for this run anyway."
   fi
 
   # What the tree looks like before an independent reviewer touches it. Scratch paths are
@@ -1004,7 +1079,37 @@ do_review() {
   # last thing the reviewer reads is that instruction and the sentinel it names. `brief_body` strips
   # the sentinel along with the comments, which leaves the instruction dangling at the end of the
   # body — inject after that and the instruction points at "## Reading assignment" instead.
-  local READING
+  local READING GEN_READING_NOTE=""
+  # When generated files are excluded, say so in the brief itself — the note mirrors the opencode
+  # port's (opencode-code-review#20): it names the excluded paths (up to 12, then folded), cites
+  # what the exclusion saved, keeps generated files readable as context for a kept finding, and
+  # past 100 paths — where the command above stays the plain range — carries the recipe instead.
+  # Without it, a reviewer that does not know why the command is filtered would "helpfully" widen
+  # it back out to the full range.
+  if [ "$GEN_COUNT" -gt 0 ]; then
+    local gen_block gen_gather
+    gen_block="$(printf '%s\n' "$gen_list" | head -n 12 | sed 's/.*/- `&`/')"
+    [ "$GEN_COUNT" -gt 12 ] && gen_block="$gen_block
+- …and $((GEN_COUNT - 12)) more"
+    gen_gather="Gather the diff with them already excluded — the command above carries one \`:(exclude,literal)\` pathspec per generated path."
+    if [ "$GEN_COUNT" -gt 100 ]; then
+      gen_gather="More than 100 generated paths were excluded, so the command above is not pathspec-filtered: gather the diff with them excluded yourself — pipe the changed paths through \`git check-attr -z --stdin linguist-generated\` and add one \`:(exclude,literal)<path>\` pathspec per flagged path."
+    fi
+    GEN_READING_NOTE="$(cat <<EOF
+
+The repo's git attributes mark $GEN_COUNT changed file(s) \`linguist-generated\` — about $GEN_LINES
+lines of machine-written churn, excluded from this run's sizing:
+
+$gen_block
+
+$gen_gather Do not widen the command back out: any other path git marks \`linguist-generated\` is
+equally out of scope, and no finding belongs inside these files — open one only as context for a
+kept finding that depends on it. Say in one short line at the top of the review that generated
+files were excluded ($GEN_COUNT file(s), about $GEN_LINES lines). (GROK_REVIEW_INCLUDE_GENERATED=1
+reviews them too.)
+EOF
+)"
+  fi
   READING="$(cat <<EOF
 ## Reading assignment
 
@@ -1013,6 +1118,7 @@ anything above names a different range or base branch, this supersedes it.
 
 Read around the change with your tools when you need the surrounding code: the whole tree is
 checked out at HEAD; it is only the DIFF that is scoped.
+$GEN_READING_NOTE
 EOF
 )"
 
@@ -1250,7 +1356,7 @@ print_accounting() { # <outcome>
   echo "  lens             ${LENS:-?}${ROUND:+ (round $ROUND)} on '${TOPIC:-?}'" >&2
   echo "  model            ${MODEL_USED:-model unreported}" >&2
   echo "  outcome          $1" >&2
-  echo "  reading          ${FILES_CHANGED:-?} file(s)$([ "${DELTA:-0}" -eq 1 ] && echo " (DELTA since ${SINCE_SHA:-?})"), ${DIFF_LINES:-?} diff lines / ${DIFF_BYTES:-?} bytes" >&2
+  echo "  reading          ${FILES_CHANGED:-?} file(s)$([ "${DELTA:-0}" -eq 1 ] && echo " (DELTA since ${SINCE_SHA:-?})"), ${DIFF_LINES:-?} diff lines / ${DIFF_BYTES:-?} bytes${GEN_NOTE:-}" >&2
   echo "  turns            $(json_int "${RAW:-/dev/null}" num_turns)" >&2
   echo "  tokens           $(json_int "${RAW:-/dev/null}" usage.input_tokens) in (uncached) + $(json_int "${RAW:-/dev/null}" usage.cache_read_input_tokens) cache-read / $(json_int "${RAW:-/dev/null}" usage.output_tokens) out — total $(json_int "${RAW:-/dev/null}" usage.total_tokens)" >&2
   local c; c="$(json_str "${RAW:-/dev/null}" total_cost_usd 2>/dev/null || true)"
